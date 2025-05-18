@@ -2,6 +2,14 @@
 #define _TASKSYS_H
 
 #include "itasksys.h"
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <vector>
+#include <queue>
+#include <atomic>
+#include <unordered_map>
+#include <set>
 
 /*
  * TaskSystemSerial: This class is the student's implementation of a
@@ -26,6 +34,9 @@ class TaskSystemSerial: public ITaskSystem {
  * of the ITaskSystem interface.
  */
 class TaskSystemParallelSpawn: public ITaskSystem {
+    private:
+        int num_threads;
+
     public:
         TaskSystemParallelSpawn(int num_threads);
         ~TaskSystemParallelSpawn();
@@ -43,6 +54,24 @@ class TaskSystemParallelSpawn: public ITaskSystem {
  * documentation of the ITaskSystem interface.
  */
 class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
+    private:
+        int num_threads;
+        std::vector<std::thread> thread_pool;
+        
+        // Task queue
+        std::queue<std::pair<IRunnable*, int>> tasks;
+        
+        // Synchronization
+        std::mutex queue_mutex;
+        bool shutdown;
+        
+        // Counters to track task completion
+        std::atomic<int> tasks_remaining;
+        int total_tasks;
+        
+        // Thread work function
+        void worker_thread();
+
     public:
         TaskSystemParallelThreadPoolSpinning(int num_threads);
         ~TaskSystemParallelThreadPoolSpinning();
@@ -53,6 +82,16 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
         void sync();
 };
 
+// Structure to represent a bulk task launch
+struct BulkTask {
+    IRunnable* runnable;
+    int num_total_tasks;
+    std::vector<TaskID> deps;
+    std::set<TaskID> dependent_tasks; // Tasks that depend on this task
+    int tasks_remaining;
+    bool is_ready;
+};
+
 /*
  * TaskSystemParallelThreadPoolSleeping: This class is the student's
  * optimized implementation of a parallel task execution engine that uses
@@ -60,6 +99,36 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
  * itasksys.h for documentation of the ITaskSystem interface.
  */
 class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
+    private:
+        int num_threads;
+        std::vector<std::thread> thread_pool;
+        
+        // Task queue for the current run() call
+        std::queue<std::pair<IRunnable*, int>> tasks;
+        
+        // Synchronization
+        std::mutex queue_mutex;
+        std::condition_variable cv_workers; // For worker threads waiting for tasks
+        std::condition_variable cv_main;    // For main thread waiting for task completion
+        bool shutdown;
+        
+        // Counters to track task completion for the current run() call
+        std::atomic<int> tasks_remaining;
+        int total_tasks;
+        
+        // For Part B: Task graph management
+        std::atomic<TaskID> next_task_id;
+        std::unordered_map<TaskID, BulkTask> task_graph;
+        
+        // Queue of tasks that are ready to run (no dependencies)
+        std::queue<std::pair<TaskID, int>> ready_tasks;
+        
+        // Thread work function
+        void worker_thread();
+        
+        // Helper functions for dependency tracking
+        void make_tasks_ready(TaskID completed_task_id);
+
     public:
         TaskSystemParallelThreadPoolSleeping(int num_threads);
         ~TaskSystemParallelThreadPoolSleeping();
